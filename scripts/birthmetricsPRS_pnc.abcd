@@ -1,0 +1,1347 @@
+---
+title: "birthmetricsPRS_pnc.abcd"
+author: "Audrey"
+date: "10/15/2021"
+output: html_document
+---
+
+load packages
+```{r}
+library(dplyr)
+library(tidyr)
+library(nlme)
+library(nnet)
+library(ggplot2)
+library(RColorBrewer)
+library(ggpubr)
+library(RVAideMemoire)
+library(broom)
+library(ggcorrplot)
+library(Hmisc)
+library(reshape2)
+library(car)
+library(tidyverse)
+library(ggseg)
+ 
+```
+
+
+
+####################### 
+######### PNC ######### 
+####################### 
+
+load pnc data
+```{r}
+pnc <- read.csv("10042021_pnc.csv") #contains PRS for gestational age and birthweight as well as other psychiatric disorders, demographics, clinical measures from GOASSESS and other assessments, imaging phenotypes 
+
+```
+
+
+PRS associations with birth metric phenotypes (gestational age and birthweight)
+```{r}
+# linear models
+gestage.PRS_lm <- lm(gest_age ~ sex + ga_PRS_inverse + PC1 + PC2 + PC3 + PC4 + PC5 + PC6 + PC7 + PC8 + PC9 + PC10, data=pnc) 
+summary(gestage.PRS_lm) 
+ 
+
+bw.PRS_lm <- lm(birthwt_kg ~ sex + bw_PRS_std + PC1 + PC2 + PC3 + PC4 + PC5 + PC6 + PC7 + PC8 + PC9 + PC10, data=pnc) 
+summary(bw.PRS_lm)
+ 
+#############
+## figures ##
+#############
+library(RColorBrewer)
+library(ggplot2)
+library(ggpubr)
+
+
+# if gest_age, ga_PRS_inverse, and birtwt_kg are not normally distributed, may consider spearman? 
+(pnc_phen_gaPRS <- ggplot(data=pnc,aes(y=gest_age, x=ga_PRS_inverse)) +
+  geom_point(alpha = 0.7, size = 2, color = '#D4B9DA') + geom_smooth(method = "lm", se = FALSE, colour='#DF65B0', size = 0.5) + theme(axis.text.x=element_text(size=15), axis.title.x=element_text(size=12), axis.title.y=element_text(size=12)) + ggtitle("PNC") + labs(x="Gestational Age PRS", y="Gestational Age (weeks)", shape = "", color = "") + theme_classic() + stat_cor(method = "pearson", label.x.npc = 0.01, label.y.npc = 0.8, size=5))
+#ggsave(pnc_phen_gaPRS, file="pnc_gestagePRS.pdf", width = 4, height=4, dpi=300)
+ 
+ 
+(pnc_phen_bwPRS <- ggplot(data=pnc,aes(y=birthwt_kg, x=bw_PRS_std)) +
+  geom_point(alpha = 0.7, size = 2, color = '#2166AC') + geom_smooth(method = "lm", se = FALSE, colour='#B2182B', size = 0.5) + theme(axis.text.x=element_text(size=15), axis.title.x=element_text(size=12), axis.title.y=element_text(size=12)) + ggtitle("PNC") + labs(x="Birthweight PRS", y="Birthweight (kg)", shape = "", color = "") + theme_classic() + stat_cor(method = "pearson", label.x.npc = 0.01, label.y.npc = 0.8, size=5))
+#ggsave(pnc_phen_bwPRS, file="pnc_bwPRS.pdf", width = 4, height=4, dpi=300)
+
+```
+
+ 
+Can gaPRS distinguish between degrees of prematurity? 
+```{r}
+
+# variable: term_status (in pnc)
+# very preterm less than 32 weeks (technically extremely preterm is < 28 and very preterm is 28-32 wks)
+# moderate-to-late preterm 32-37 weeks
+# full term 37-40 weeks
+# late term 41 + weeks
+ 
+# first check proportional odds assumption to see if ordinal logistic regression is appropriate
+library(brant)
+library(MASS)
+m <- polr(term_status ~ sex + ga_PRS_inverse + PC1 + PC2 + PC3 + PC4 + PC5 + PC6 + PC7 + PC8 + PC9 + PC10, data = pnc, Hess=TRUE)
+summary(m)
+brant(m) # dataset FAILS proportional odds assumption. Need to do multinomial logistic regression instead.
+
+#########################################################################################################
+#### can gaPRS distinguish between very preterm, moderate-to-late preterm, full term, and late term? #### 
+#########################################################################################################
+
+# multinomial regression  
+
+library(nnet)
+pnc$term_status <- relevel(pnc$term_status, ref = "full_term")
+test <- multinom(term_status ~ sex + ga_PRS_inverse + PC1 + PC2 + PC3 + PC4 + PC5 + PC6 + PC7 + PC8 + PC9 + PC10, data=pnc)
+summary(test)
+
+#calculate p-values (since multinom doesn't provide pvals)
+z <- summary(test)$coefficients/summary(test)$standard.errors
+z
+p <- (1 - pnorm(abs(z), 0, 1)) * 2 #2-tailed z
+p
+
+#The ratio of the probability of choosing one outcome category over the probability of choosing the baseline category is often referred as relative risk 
+exp(coef(test)) #odds ratio 
+# so the odds ratio (for one unit increase in PRS - after applying inverse) is 0.634 for being late term versus full term, whereas odds ratio is 1.25 and 1.57 respectively for moderate-to-late preterm and very preterm babies.
+
+library(RVAideMemoire)
+library(broom)
+exp(coef(test))
+oddsratio_df <- OR.multinom(test, ga_PRS_inverse, conf.level = 0.95) # different odds ratios for very preterm, moderate-to-late preterm, and late term (relative to full term)
+
+ 
+################################################################
+#### can gaPRS distinguish between preterm and not-preterm? #### 
+################################################################
+
+# multinomial regression
+
+pnc$term_statusBINARY <- relevel(pnc$term_statusBINARY, ref = "full_term")
+test2 <- multinom(term_statusBINARY ~ sex + ga_PRS_inverse + PC1 + PC2 + PC3 + PC4 + PC5 + PC6 + PC7 + PC8 + PC9 + PC10, data=pnc)
+summary(test2)
+
+ 
+#calculate p-values (since multinom doesn't provide pvals)
+z <- summary(test2)$coefficients/summary(test2)$standard.errors
+z
+p <- (1 - pnorm(abs(z), 0, 1)) * 2 #2-tailed z
+p
+
+exp(coef(test2)) #odds ratio 
+oddsratio_df2 <- OR.multinom(test2, ga_PRS_inverse, conf.level = 0.95) # shows odds ratio of preterm versus full term
+
+
+#############
+## figure ##
+#############
+library(RColorBrewer)
+library(ggplot2)
+library(ggpubr)
+
+oddsratio_df <- oddsratio_df %>% mutate(term_status = rownames(oddsratio_df))
+oddsratio_df_clean <- oddsratio_df[c(1:3),]
+oddsratio_df_clean$term_status <- as.factor(oddsratio_df_clean$term_status)
+BirthTerm <- c("Late Term", "Moderate to Late Preterm","Very Preterm")
+(oddsratio.plot <- ggplot(data=oddsratio_df_clean, aes(y=term_status, x=Odds.ratio, label="Term Status", colour = term_status)) +
+    geom_point(size=2, shape=19)   +
+    geom_errorbarh(aes(xmin=CI.inf, xmax=CI.sup), height=.05) +  
+    coord_fixed(ratio=.3) +
+    geom_vline(xintercept=1, linetype='longdash')  + ggtitle("Birth Term Status and Gestational Age PRS") + xlab("Odds Ratio") + ylab("Term Status") +
+   theme(legend.position = "none", axis.title.y = element_blank(), axis.text.y = element_text(angle=45)) + scale_y_discrete(labels= BirthTerm) )
+     
+#ggsave(oddsratio.plot, file="TermStatus_OR.pdf", width = 5, height=3, dpi=300)
+
+```
+
+
+Correlation matrix for PRS scores (gest age, birthweight, SCZ, BIP, MDD, PTSD, AD, ASD, IQ, and height)
+```{r}
+
+library(ggcorrplot)
+library(Hmisc)
+dat2 <- subset(pnc, select = c(ga_PRS_std, bw_PRS_std, PRS_SCZ, PRS_BIP, PRS_MDD, PRS_PTSD, PRS_AD, PRS_ASD, PRS_IQ, PRS_height))
+
+corr <- round(cor(dat2, use = "complete.obs"), 5)
+order <- c("ga_PRS_std", "bw_PRS_std", "PRS_SCZ", "PRS_BIP", "PRS_MDD", "PRS_PTSD", "PRS_AD", "PRS_ASD", "PRS_IQ", "PRS_height")
+corr1 <- corr[order, order]
+identical(rcorr(as.matrix(dat2)),corr)
+
+rcorr(as.matrix(dat2)) 
+ 
+# compute matrix of correlation p-values
+p.mat <- cor_pmat(dat2)
+
+
+#############
+## figure ##
+#############
+# Visualize the correlation matrix
+(correlation_matrix <- ggcorrplot(corr1, type = "lower", 
+   lab = TRUE, 
+   outline.col = "white",
+   ggtheme = ggplot2::theme_gray, lab_size = 3,
+   colors = c("#6D9EC1", "white", "#E46726"), hc.order = FALSE, insig = "blank", p.mat=p.mat))
+
+#pdf("prs_corr.pdf")
+#print(correlation_matrix)
+#dev.off()
+
+```
+
+
+Can gaPRS and bwPRS predict clinical measures?
+```{r}
+
+# exploratory -- running multiple linear regressions to see if PRS predicts any of the clinical measures (GO, GO1, bifactor, corrtraits, psychosisJCPP)
+
+# get column indices of clinical assessments
+a <- which(grepl("GO_Overall_Psychopathology", names(pnc)))
+b <- which(grepl("psychosisJCPP_F3_Negative_3Fac", names(pnc)))
+
+# names of all the clinical measures
+names(pnc)[a:b] 
+
+# loop through all the variables to see if ga PRS predicts any of the clinical variables
+fit_gaPRS <- lapply(pnc[,a:b], function(x) summary(lm(x ~ sex + ga_PRS_inverse + ageAtClinicalAssess1 + PC1 + PC2 + PC3 + PC4 + PC5 + PC6 + PC7 + PC8 + PC9 + PC10, data=pnc))) 
+# extract p values for ga_PRS predictor
+fit_gaPRS_pval <- lapply(pnc[,a:b], function(x) summary(lm(x ~ sex + ga_PRS_std + ageAtClinicalAssess1 + PC1 + PC2 + PC3 + PC4 + PC5 + PC6 + PC7 + PC8 + PC9 + PC10, data=pnc))$coefficients[,"Pr(>|t|)"][3])  
+# select the outcome variables for which PRS predictor had pval < 0.05
+fit_gaPRS_sigoutcomes <- which(fit_gaPRS_pval < 0.05) 
+fit_gaPRS[fit_gaPRS_sigoutcomes] # look at corresponding beta values 
+
+fit_bwPRS <- lapply(pnc[,a:b], function(x) lm(x ~ sex + bw_PRS_std + ageAtClinicalAssess1 +  PC1 + PC2 + PC3 + PC4 + PC5 + PC6 + PC7 + PC8 + PC9 + PC10, data=pnc))
+fit_bwPRS_pval <- lapply(pnc[,a:b], function(x) summary(lm(x ~ sex + bw_PRS_std + ageAtClinicalAssess1 +  PC1 + PC2 + PC3 + PC4 + PC5 + PC6 + PC7 + PC8 + PC9 + PC10, data=pnc))$coefficients[,"Pr(>|t|)"][3])  
+fit_bwPRS_sigoutcomes <- which(fit_bwPRS_pval < 0.05)  
+fit_bwPRS[fit_bwPRS_sigoutcomes]
+
+
+###############################################################################
+###### make dataframe of beta values of linear models (for making figures) ####
+###############################################################################
+gaPRS_beta <- as.data.frame(lapply(pnc[,a:b], function(x) summary(lm(x ~ sex + ga_PRS_inverse + ageAtClinicalAssess1 + PC1 + PC2 + PC3 + PC4 + PC5 + PC6 + PC7 + PC8 + PC9 + PC10, data=pnc))$coefficients[,"Estimate"][3]))
+
+bwPRS_beta <- as.data.frame(lapply(pnc[,a:b], function(x) summary(lm(x ~ sex + bw_PRS_std + ageAtClinicalAssess1 + PC1 + PC2 + PC3 + PC4 + PC5 + PC6 + PC7 + PC8 + PC9 + PC10, data=pnc))$coefficients[,"Estimate"][3]))
+
+# correct for multiple comparisons (Benjamini-Hochberg) -- not totally sure if did this right  
+pvalues_gaPRS_BH.plot <- as.data.frame(t(p.adjust(fit_gaPRS_pval,method="BH")))
+rownames(pvalues_gaPRS_BH.plot) <- "pvalues_gaPRS_BH"
+ 
+pvalues_bwPRS_BH.plot <- as.data.frame(t(p.adjust(fit_bwPRS_pval,method="BH")))
+rownames(pvalues_bwPRS_BH.plot) <- "pvalues_bwPRS_BH"
+
+# get the clinical variables that were significantly predicted by gestage or birthweight PRS
+sig_PRS <- unique(c(names(pvalues_gaPRS_BH.plot[which(pvalues_gaPRS_BH.plot < 0.05)]), names(pvalues_bwPRS_BH.plot[which(pvalues_bwPRS_BH.plot < 0.05)])))
+ 
+PRS.plot_temp <- rbind(gaPRS_beta, bwPRS_beta) 
+PRS.plot_temp <- PRS.plot_temp %>% mutate(PRS = rownames(PRS.plot_temp))
+
+library(reshape2) 
+PRS.plot_temp2 <-  PRS.plot_temp[(names(PRS.plot_temp) %in% sig_PRS)]
+PRS.plot_temp2<- PRS.plot_temp2 %>% mutate(PRS = rownames(PRS.plot_temp2))
+PRS.plot <- melt(PRS.plot_temp2) 
+
+pval.plot_temp <- rbind(pvalues_gaPRS_BH.plot, pvalues_bwPRS_BH.plot)
+PRSpval.plot <-  pval.plot_temp[(names(pval.plot_temp) %in% sig_PRS)]
+
+#add column for pval in dataframe
+PRSpval.plot <- PRSpval.plot %>% mutate(PRS = PRS.plot$PRS[1:2])
+PRSpval.plot <- melt(PRSpval.plot)  
+colnames(PRSpval.plot)[3] <- paste("adjusted_p", colnames(PRSpval.plot)[3], sep = ".")
+PRS.plot_with_pval <- PRS.plot %>% mutate(adjusted_p.value = PRSpval.plot$adjusted_p.value, significance = ifelse(PRSpval.plot$adjusted_p.value < 0.05, "sig", "insig"))  
+
+
+###########################
+## figure of beta values ##
+###########################
+(geompoint.plot_beta <- ggplot(data = PRS.plot_with_pval , aes(x = PRS, y = variable, shape=significance)) +
+  geom_point(aes(size=abs(value), color = value<0)) + labs(size = "Magnitude of beta value") + scale_shape_manual(values = c(1, 16)) + 
+  theme_minimal()+  coord_fixed(ratio=.7) +
+  theme(axis.text.y = element_text(size = 6), axis.text.x = element_text(angle=45, hjust = 1)))
+
+# ggsave(geompoint.plot_beta, file="prs_beta_gestageBW.pdf", dpi=300)
+
+  
+```
+
+
+Do gestational age and birthweight (phenotypes) predict brain volumes? 
+```{r}
+# linear models of phenotype (ga/bw) and imaging (for pnc) 
+
+# gestational age vs imaging for PNC            
+d <- which(grepl("SurfaceHoles", colnames(pnc)))
+pnc_imag <- as.data.frame(pnc[,-d])
+a <-  which(grepl("AsegVol_Left.Lateral.Ventricle", colnames(pnc_imag)))
+b <-  which( colnames(pnc_imag) == "Vol_insula")
+
+pnc_imag <-as.data.frame(pnc_imag[,c(a:b)])
+pnc_imag_gestage <- data.frame(matrix(NA, nrow = 384, ncol = 4))
+names(pnc_imag_gestage) <- c("Value", "Std.Error", " t-value", "p-value")
+list_var <- c() 
+for (i in 1:length(pnc_imag)) { 
+  variable <- pnc_imag[,i]
+  lm_pnc <- lm(variable ~  sex + gest_age + ageAtClinicalAssess1 + averageManualRating + AsegVol_SurfaceHoles + envSES + Cummulative_Stress_Load_No_Rape + PC1 + PC2 + PC3 + PC4 + PC5 + PC6 + PC7 + PC8 + PC9 + PC10, data=pnc)
+  pnc_imag_gestage[i, ] <- summary(lm_pnc)$coefficients[3,]
+  list_var[i] <- names(pnc_imag)[i]
+}
+ 
+ 
+pnc_imag_gestage <- cbind(list_var, pnc_imag_gestage) 
+which(pnc_imag_gestage$`p-value` < 0.05)
+which(p.adjust(pnc_imag_gestage$`p-value`, method="BY") < 0.05) # gestational age doesn't predict any imaging phenotypes
+  
+# prematurity vs imaging for PNC
+d <- which(grepl("SurfaceHoles", colnames(pnc)))
+pnc_imag <- as.data.frame(pnc[,-d])
+a <-  which(grepl("AsegVol_Left.Lateral.Ventricle", colnames(pnc_imag)))
+b <-  which( colnames(pnc_imag) == "Vol_insula")
+
+pnc_imag <-as.data.frame(pnc_imag[,c(a:b)])
+pnc_imag_preterm <- data.frame(matrix(NA, nrow = 384, ncol = 4))
+names(pnc_imag_preterm) <- c("Value", "Std.Error", " t-value", "p-value")
+list_var <- c() 
+for (i in 1:length(pnc_imag)) { 
+  variable <- pnc_imag[,i]
+  cat(i, "of", length(pnc_imag))
+  lm_pnc <- lm(variable ~  sex + term_statusBINARY + ageAtClinicalAssess1 + averageManualRating + AsegVol_SurfaceHoles + envSES + Cummulative_Stress_Load_No_Rape + PC1 + PC2 + PC3 + PC4 + PC5 + PC6 + PC7 + PC8 + PC9 + PC10, data=pnc)
+  pnc_imag_preterm[i, ] <- summary(lm_pnc)$coefficients[3,]
+  list_var[i] <- names(pnc_imag)[i]
+}
+
+pnc_imag_preterm <- cbind(list_var, pnc_imag_preterm) 
+which(pnc_imag_preterm$`p-value` < 0.05)
+which(p.adjust(pnc_imag_preterm$`p-value`, method="BH") < 0.05) # degree of prematurity doesn't predict imaging phenotypes
+
+
+# birthweight vs imaging for PNC   
+d <- which(grepl("SurfaceHoles", colnames(pnc)))
+pnc_imag <- as.data.frame(pnc[,-d])
+a <-  which(grepl("AsegVol_Left.Lateral.Ventricle", colnames(pnc_imag)))
+b <-  which( colnames(pnc_imag) == "Vol_insula")
+
+pnc_imag <-as.data.frame(pnc_imag[,c(a:b)])
+pnc_imag_birthwt <- data.frame(matrix(NA, nrow = 384, ncol = 4))
+names(pnc_imag_birthwt) <- c("Value", "Std.Error", " t-value", "p-value")
+list_var <- c() 
+for (i in 1:length(pnc_imag)) {  
+  variable <- pnc_imag[,i]
+  lm_pnc <- lm(variable ~  sex + birthwt_kg + ICV + ageAtClinicalAssess1 + averageManualRating + AsegVol_SurfaceHoles + envSES + Cummulative_Stress_Load_No_Rape + PC1 + PC2 + PC3 + PC4 + PC5 + PC6 + PC7 + PC8 + PC9 + PC10, data=pnc)
+  pnc_imag_birthwt[i, ] <- summary(lm_pnc)$coefficients[3,]
+  list_var[i] <- names(pnc_imag)[i]
+}
+  
+pnc_imag_birthwt <- cbind(list_var, pnc_imag_birthwt) 
+which(pnc_imag_birthwt$`p-value` < 0.05)
+which(p.adjust(pnc_imag_birthwt$`p-value`, method="BH") < 0.05) # 4 hits
+  
+pnc_imag_birthwt$list_var[which(p.adjust(pnc_imag_birthwt$`p-value`, method="BH") < 0.05)] # 4 hits
+
+ 
+
+# just do right hemisphere for birthweight prs/imaging
+which(pnc_imag_birthwt$list_var == "rh_Vol_inferiorparietal")
+pnc_bw_rSA <- pnc_imag_birthwt[219,]  
+pnc_bw_rVol <- pnc_imag_birthwt[323,]  
+ 
+pnc_bw_rSA$list_var <- gsub(pnc_bw_rSA$list_var, pattern="rh_SA_", replacement="")
+pnc_bw_rSA$list_var <- gsub(pnc_bw_rSA$list_var, pattern="inferior", replacement="inferior ")
+pnc_bw_rSA$tval
+pnc_bw_rVol$list_var <- gsub(pnc_bw_rVol$list_var, pattern="rh_Vol_", replacement="")
+ 
+names(pnc_bw_rSA)[c(1,4)] <- c("region", "tval")
+names(pnc_bw_rVol)[c(1,4)] <- c("region", "tval")
+ 
+
+##################
+##### figure #####
+##################
+library(tidyverse)
+library(ggseg)
+(pnc_bw_rSA.fig <- pnc_bw_rSA %>% 
+  ggseg(mapping=aes(fill=as.numeric(tval)), position="stacked", colour="black",size=.5,show.legend = T,  hemisphere = "right") +   labs(fill = "t value") + scale_fill_gradientn(colors = hcl.colors(20, "BuPu")) + theme_void() + theme( plot.title = element_text(vjust = 9, hjust = 0.5), legend.position = "bottom",
+        legend.text = element_text(size = 8)) +
+  ggtitle("Birthweight predicts Inferior Parietal CT and SA"))
+
+#ggsave(pnc_bw_rSA.fig, file="pnc_bw_rSA.CT.pdf", width = 6, height=4, dpi=300)
+ 
+```
+
+
+Do gaPRS and bwPRS predict brain volumes? 
+```{r}
+# ga_PRS and bw_PRS do not predict the following brain volumes: 
+#CortexVol
+#SubCortGrayVol
+#CorticalWhiteMatterVol
+#Ventricular_CSF
+vol_i <-  which(grepl("AsegVol_CortexVol", colnames(pnc)))
+vol_i <- append(vol_i, which(grepl("AsegVol_SubCortGrayVol", colnames(pnc))))
+vol_i <- append(vol_i, which(grepl("AsegVol_CorticalWhiteMatterVol", colnames(pnc))))
+vol_i <- append(vol_i, which(grepl("AsegVol_Ventricular_CSF", colnames(pnc))))
+
+              
+fit_gaPRS_imaging4 <- lapply(pnc[,vol_i], function(x) summary(lm(x ~ sex + ga_PRS_inverse + ageAtClinicalAssess1 + averageManualRating  + AsegVol_lhSurfaceHoles + AsegVol_rhSurfaceHoles + AsegVol_SurfaceHoles + PC1 + PC2 + PC3 + PC4 + PC5 + PC6 + PC7 + PC8 + PC9 + PC10, data=pnc)))  
+fit_gaPRS_imaging4_pval <- lapply(pnc[,vol_i], function(x) summary(lm(x ~ sex + ga_PRS_inverse + ageAtClinicalAssess1 + averageManualRating + AsegVol_lhSurfaceHoles + AsegVol_rhSurfaceHoles + AsegVol_SurfaceHoles + PC1 + PC2 + PC3 + PC4 + PC5 + PC6 + PC7 + PC8 + PC9 + PC10, data=pnc))$coefficients[,"Pr(>|t|)"][3])  
+fit_gaPRS_imaging4_sigoutcomes <- which(fit_gaPRS_imaging4_pval < 0.05) 
+fit_gaPRS_imaging4[fit_gaPRS_imaging4_sigoutcomes]  
+which(p.adjust(fit_gaPRS_imaging4_pval, method="BY") < 0.05) #nothing survives correction
+ 
+fit_bwPRS_imaging4 <- lapply(pnc[,vol_i], function(x) summary(lm(x ~ sex + bw_PRS_std + ageAtClinicalAssess1 + averageManualRating + AsegVol_lhSurfaceHoles + AsegVol_rhSurfaceHoles + AsegVol_SurfaceHoles + PC1 + PC2 + PC3 + PC4 + PC5 + PC6 + PC7 + PC8 + PC9 + PC10, data=pnc)))  
+fit_bwPRS_imaging4_pval <- lapply(pnc[,vol_i], function(x) summary(lm(x ~ sex + bw_PRS_std + ageAtClinicalAssess1 + averageManualRating + AsegVol_lhSurfaceHoles + AsegVol_rhSurfaceHoles + AsegVol_SurfaceHoles +PC1 + PC2 + PC3 + PC4 + PC5 + PC6 + PC7 + PC8 + PC9 + PC10, data=pnc))$coefficients[,"Pr(>|t|)"][3])  
+fit_bwPRS_imaging4_sigoutcomes <- which(fit_bwPRS_imaging4_pval < 0.05) 
+fit_bwPRS_imaging4[fit_bwPRS_imaging4_sigoutcomes]  
+which(p.adjust(fit_bwPRS_imaging4_pval, method="BY") < 0.05) #nothing survives correction
+
+
+# go through all imaging variables to see if any are predicted by PRS
+# gaPRS for PNC            
+d <- which(grepl("SurfaceHoles", colnames(pnc)))
+pnc_imag <- as.data.frame(pnc[,-d])
+a <-  which(grepl("AsegVol_Left.Lateral.Ventricle", colnames(pnc_imag)))
+b <-  which( colnames(pnc_imag) == "Vol_insula")
+
+ 
+pnc_imag <-as.data.frame(pnc_imag[,c(a:b)])
+pnc_imag_gaPRS <- data.frame(matrix(NA, nrow = 384, ncol = 4))
+names(pnc_imag_gaPRS) <- c("Value", "Std.Error", " t-value", "p-value")
+list_var <- c() 
+for (i in 1:length(pnc_imag)) { 
+  variable <- pnc_imag[,i]
+  lm_pnc <- lm(variable ~  sex + ga_PRS_inverse + ageAtClinicalAssess1 + averageManualRating + AsegVol_SurfaceHoles + envSES + Cummulative_Stress_Load_No_Rape + PC1 + PC2 + PC3 + PC4 + PC5 + PC6 + PC7 + PC8 + PC9 + PC10, data=pnc)
+  pnc_imag_gaPRS[i, ] <- summary(lm_pnc)$coefficients[3,]
+  list_var[i] <- names(pnc_imag)[i]
+}
+
+pnc_imag_gaPRS <- cbind(list_var, pnc_imag_gaPRS) 
+pnc_imag_gaPRS$list_var[which(pnc_imag_gaPRS$`p-value` < 0.05)]
+which(p.adjust(pnc_imag_gaPRS$`p-value`, method="BH") < 0.05) # no gaPRS - imaging results
+  
+# bwPRS for PNC            
+d <- which(grepl("SurfaceHoles", colnames(pnc)))
+pnc_imag <- as.data.frame(pnc[,-d])
+a <-  which(grepl("AsegVol_Left.Lateral.Ventricle", colnames(pnc_imag)))
+b <-  which( colnames(pnc_imag) == "Vol_insula")
+
+pnc_imag <-as.data.frame(pnc_imag[,c(a:b)])
+pnc_imag_bwPRS <- data.frame(matrix(NA, nrow = 384, ncol = 4))
+names(pnc_imag_bwPRS) <- c("Value", "Std.Error", " t-value", "p-value")
+list_var <- c() 
+for (i in 1:length(pnc_imag)) { 
+  variable <- pnc_imag[,i]
+  lm_pnc <- lm(variable ~  sex + bw_PRS_std + ageAtClinicalAssess1 + averageManualRating + AsegVol_SurfaceHoles + envSES + Cummulative_Stress_Load_No_Rape + PC1 + PC2 + PC3 + PC4 + PC5 + PC6 + PC7 + PC8 + PC9 + PC10, data=pnc)
+  pnc_imag_bwPRS[i, ] <- summary(lm_pnc)$coefficients[3,]
+  list_var[i] <- names(pnc_imag)[i]
+}
+
+pnc_imag_bwPRS <- cbind(list_var, pnc_imag_bwPRS) 
+pnc_imag_bwPRS$list_var[which(pnc_imag_bwPRS$`p-value` < 0.05)]
+which(p.adjust(pnc_imag_bwPRS$`p-value`, method="BH") < 0.05) # no bwPRS - imaging results
+ 
+```
+
+
+Do brain volumes predict clinical measures?
+```{r}
+
+
+a <-  which(grepl("AsegVol_Left.Lateral.Ventricle", colnames(pnc)))
+b <-  which( colnames(pnc) == "Vol_insula")
+c <- which(grepl("GO_Overall_Psychopathology", names(pnc)))
+d <- which(grepl("psychosisJCPP_F3_Negative_3Fac", names(pnc)))
+
+# Creating pedictor and outcome vectors
+dvs_vec <- names(pnc[, c(c:d)]) #clinical variables
+ivs_vec <- names(pnc[, c(a:b)])  #imaging phenotypes
+covariates <- c(" + sex + ageAtClinicalAssess1 + averageManualRating + AsegVol_lhSurfaceHoles + AsegVol_rhSurfaceHoles + AsegVol_SurfaceHoles + PC1 + PC2 + PC3 + PC4 + PC5 + PC6 + PC7 + PC8 + PC9 + PC10")
+ 
+# Creating formulas and running the models
+ivs <- paste0(" ~ ", ivs_vec)
+dvs_ivs <- unlist(lapply(ivs, function(x) paste0(dvs_vec, x)))
+dvs_ivs_covs <- unlist(lapply(dvs_ivs, function(x) paste0(x, covariates)))
+formulas <- lapply(dvs_ivs_covs, formula)
+
+lm_results <- lapply(formulas, function(x) {
+  lm(x, data = pnc)
+})
+
+lm_pval <- lapply(formulas, function(x) {
+  summary(lm(x, data = pnc))$coefficients[,"Pr(>|t|)"][2]
+})
+
+lm_summaries <- lapply(formulas, function(x) {
+  summary(lm(x, data = pnc)) })
+
+length(lm_summaries)
+ 
+lm_sigoutcomes <- which(lm_pval < 0.05)
+lm_pval[lm_sigoutcomes]
+(lm_adj_sigoutcomes <- which(p.adjust(lm_pval, method = "BH") < 0.05))
+lm_pval[lm_adj_sigoutcomes] # sex only 
+
+#not seeing any brain volumes predicting clinical measures after including motion as covariate and correcting for multiple comparisons
+ 
+
+```
+
+
+DTI (no findings)
+```{r}
+
+pnc_dti_jlf_jlf <- read.csv("pnc_dti_jlf_jlf.csv")
+ 
+# run linear regression on dti -- FA and MD 
+c <- which(grepl("dti_dtitk_jhutract_fa_atr_l", colnames(pnc_dti_jlf)))
+d <- which(grepl("dti_dtitk_jhutract_fa_uf_r", colnames(pnc_dti_jlf)))
+e <- which(grepl("dti_dtitk_jhutract_md_atr_l", colnames(pnc_dti_jlf)))
+f<- which(grepl("dti_dtitk_jhutract_md_uf_r", colnames(pnc_dti_jlf)))
+
+ 
+gaPRS_dti <- lapply(pnc_dti_jlf[,c(c:d, e:f)], function(x) summary(lm(x ~ sex + ga_PRS_inverse + Cummulative_Stress_Load_No_Rape + ageAtClinicalAssess1 + dti64MeanRelRMS + PC1 + PC2 + PC3 + PC4 + PC5 + PC6 + PC7 + PC8 + PC9 + PC10, data=pnc_dti_jlf)))  
+gaPRS_dti_pval <- lapply(pnc_dti_jlf[,c(c:d, e:f)], function(x) summary(lm(x ~ sex + ga_PRS_inverse + Cummulative_Stress_Load_No_Rape+  ageAtClinicalAssess1 + dti64MeanRelRMS + PC1 + PC2 + PC3 + PC4 + PC5 + PC6 + PC7 + PC8 + PC9 + PC10, data=pnc_dti_jlf))$coefficients[,"Pr(>|t|)"][3])  
+gaPRS_dti_pval.sigoutcomes <- which(gaPRS_dti_pval < 0.05) 
+gaPRS_dti[gaPRS_dti_pval.sigoutcomes]  
+which(p.adjust(gaPRS_dti_pval, method="BH") < 0.05)
+
+bwPRS_dti <- lapply(pnc_dti_jlf[,c(c:d, e:f)], function(x) summary(lm(x ~ sex + bw_PRS_std + Cummulative_Stress_Load_No_Rape+  ageAtClinicalAssess1 + dti64MeanRelRMS + PC1 + PC2 + PC3 + PC4 + PC5 + PC6 + PC7 + PC8 + PC9 + PC10, data=pnc_dti_jlf)))  
+bwPRS_dti_pval <- lapply(pnc_dti_jlf[,c(c:d, e:f)], function(x) summary(lm(x ~ sex + bw_PRS_std + Cummulative_Stress_Load_No_Rape+ ageAtClinicalAssess1 + dti64MeanRelRMS + PC1 + PC2 + PC3 + PC4 + PC5 + PC6 + PC7 + PC8 + PC9 + PC10, data=pnc_dti_jlf))$coefficients[,"Pr(>|t|)"][3])  
+bwPRS_dti_pval.sigoutcomes <- which(bwPRS_dti_pval < 0.05) 
+bwPRS_dti_pval[bwPRS_dti_pval.sigoutcomes]  
+which(p.adjust(bwPRS_dti_pval, method="BY") < 0.05)
+
+
+
+# regressions with gm jlf
+c <- which(grepl("dti_jlf_fa_R_Accumbens", colnames(pnc_dti.jlf)))
+d <- which(grepl("dti_jlf_fa_L_TTG", colnames(pnc_dti.jlf)))
+e <- which(grepl("dti_jlf_md_R_Accumbens_Area", colnames(pnc_dti.jlf)))
+f<- which(grepl("dti_jlf_md_L_TTG", colnames(pnc_dti.jlf)))
+
+ 
+gaPRS_dti.jlf <- lapply(pnc_dti.jlf[,c(c:d, e:f)], function(x) summary(lm(x ~ sex + ga_PRS_inverse + Cummulative_Stress_Load_No_Rape + ageAtClinicalAssess1 + dti64MeanRelRMS + PC1 + PC2 + PC3 + PC4 + PC5 + PC6 + PC7 + PC8 + PC9 + PC10, data=pnc_dti.jlf)))  
+gaPRS_dti.jlf_pval <- lapply(pnc_dti.jlf[,c(c:d, e:f)], function(x) summary(lm(x ~ sex + ga_PRS_inverse + Cummulative_Stress_Load_No_Rape+  ageAtClinicalAssess1 + dti64MeanRelRMS + PC1 + PC2 + PC3 + PC4 + PC5 + PC6 + PC7 + PC8 + PC9 + PC10, data=pnc_dti.jlf))$coefficients[,"Pr(>|t|)"][3])  
+gaPRS_dti.jlf_pval.sigoutcomes <- which(gaPRS_dti.jlf_pval < 0.05) 
+gaPRS_dti.jlf[gaPRS_dti.jlf_pval.sigoutcomes]  
+which(p.adjust(gaPRS_dti.jlf_pval, method="BH") < 0.05)
+
+ 
+bwPRS_dti.jlf <- lapply(pnc_dti.jlf[,c(c:d, e:f)], function(x) summary(lm(x ~ sex + bw_PRS_std + Cummulative_Stress_Load_No_Rape+  ageAtClinicalAssess1 + dti64MeanRelRMS + PC1 + PC2 + PC3 + PC4 + PC5 + PC6 + PC7 + PC8 + PC9 + PC10, data=pnc_dti.jlf)))  
+bwPRS_dti.jlf_pval <- lapply(pnc_dti.jlf[,c(c:d, e:f)], function(x) summary(lm(x ~ sex + bw_PRS_std + Cummulative_Stress_Load_No_Rape+ ageAtClinicalAssess1 + dti64MeanRelRMS + PC1 + PC2 + PC3 + PC4 + PC5 + PC6 + PC7 + PC8 + PC9 + PC10, data=pnc_dti.jlf))$coefficients[,"Pr(>|t|)"][3])  
+bwPRS_dti.jlf_pval.sigoutcomes <- which(bwPRS_dti.jlf_pval < 0.05) 
+bwPRS_dti.jlf_pval[bwPRS_dti.jlf_pval.sigoutcomes]  
+which(p.adjust(bwPRS_dti.jlf_pval, method="BY") < 0.05)
+
+
+# regressions with wm jlf
+
+
+c <- which(grepl("dti_jlf_fa_L_Limbic_Lobe_WM", colnames(pnc_dti.jlf)))
+d <- which(grepl("dti_jlf_fa_R_Temporal_Lobe_WM", colnames(pnc_dti.jlf)))
+e <- which(grepl("dti_jlf_md_L_Limbic_Lobe_WM", colnames(pnc_dti.jlf)))
+f<- which(grepl("dti_jlf_md_R_Temporal_Lobe_WM", colnames(pnc_dti.jlf)))
+
+ 
+gaPRS_dti.jlf_WM <- lapply(pnc_dti.jlf[,c(c:d, e:f)], function(x) summary(lm(x ~ sex + ga_PRS_inverse + Cummulative_Stress_Load_No_Rape + ageAtClinicalAssess1 + dti64MeanRelRMS + PC1 + PC2 + PC3 + PC4 + PC5 + PC6 + PC7 + PC8 + PC9 + PC10, data=pnc_dti.jlf)))  
+gaPRS_dti.jlf_WM_pval <- lapply(pnc_dti.jlf[,c(c:d, e:f)], function(x) summary(lm(x ~ sex + ga_PRS_inverse + Cummulative_Stress_Load_No_Rape+  ageAtClinicalAssess1 + dti64MeanRelRMS + PC1 + PC2 + PC3 + PC4 + PC5 + PC6 + PC7 + PC8 + PC9 + PC10, data=pnc_dti.jlf))$coefficients[,"Pr(>|t|)"][3])  
+gaPRS_dti.jlf_WM_pval.sigoutcomes <- which(gaPRS_dti.jlf_pval < 0.05) 
+gaPRS_dti.jlf_WM[gaPRS_dti.jlf_WM_pval.sigoutcomes]  
+which(p.adjust(gaPRS_dti.jlf_WM_pval, method="BH") < 0.05)
+
+ bwPRS_dti.jlf_WM <- lapply(pnc_dti.jlf[,c(c:d, e:f)], function(x) summary(lm(x ~ sex + bw_PRS_std + Cummulative_Stress_Load_No_Rape + ageAtClinicalAssess1 + dti64MeanRelRMS + PC1 + PC2 + PC3 + PC4 + PC5 + PC6 + PC7 + PC8 + PC9 + PC10, data=pnc_dti.jlf)))  
+bwPRS_dti.jlf_WM_pval <- lapply(pnc_dti.jlf[,c(c:d, e:f)], function(x) summary(lm(x ~ sex + bw_PRS_std + Cummulative_Stress_Load_No_Rape+  ageAtClinicalAssess1 + dti64MeanRelRMS + PC1 + PC2 + PC3 + PC4 + PC5 + PC6 + PC7 + PC8 + PC9 + PC10, data=pnc_dti.jlf))$coefficients[,"Pr(>|t|)"][3])  
+bwPRS_dti.jlf_WM_pval.sigoutcomes <- which(bwPRS_dti.jlf_pval < 0.05) 
+bwPRS_dti.jlf_WM[bwPRS_dti.jlf_WM_pval.sigoutcomes]  
+which(p.adjust(bwPRS_dti.jlf_WM_pval, method="BH") < 0.05)
+```
+
+
+
+####################### 
+######## ABCD #########
+#######################
+
+load abcd data
+```{r}
+abcd <- read.csv("abcd_clean.csv")
+```
+ 
+ 
+Gestational age and birthweight PRS associations with ga / bw
+```{r}
+
+   
+# 
+bw_prs <- lm(birthwt_kg ~ sex + bw_pgs + age_days, data=abcd) 
+summary(bw_prs) 
+bw_prs_noage <- lm(birthwt_kg ~ sex + bw_pgs, data=abcd) 
+summary(bw_prs_noage) 
+bw_prs_pc <- lm(birthwt_kg ~ sex + bw_pgs + PC1 + PC2 + PC3 + PC4 + PC5 + PC6 + PC7 + PC8 + PC9 + PC10, data=abcd) 
+summary(bw_prs_pc)   
+summary(bw_prs_noage) 
+
+
+# logistic regression
+glm_gestage_PRS  <- glm(premature ~ sex + ga_PRS_inverse + age_days, data=abcd, na.action = na.omit, family = "binomial")
+summary(glm_gestage_PRS)
+
+glm_gestage_PRS_noage  <- glm(premature ~ sex + ga_PRS_inverse, data=abcd, na.action = na.omit, family = "binomial")
+summary(glm_gestage_PRS_noage)
+ 
+glm_gestage_PRS.pc  <- glm(premature ~ sex + ga_PRS_inverse + age_days + PC1 + PC2 + PC3 + PC4 + PC5 + PC6 + PC7 + PC8 + PC9 + PC10, data=abcd, na.action = na.omit, family = "binomial")
+summary(glm_gestage_PRS.pc)
+summary(glm_gestage_PRS_noage)
+
+ 
+#compare to PNC
+gestation_age_PRS_lm <- lm(gest_age ~ sex + ga_PRS_inverse + PC1 + PC2 + PC3 + PC4 + PC5 + PC6 + PC7 + PC8 + PC9 + PC10, data=pnc) 
+summary(gestation_age_PRS_lm)  
+ 
+birthweight_PRS_lm <- lm(birthwt_kg ~ sex + bw_PRS_std + PC1 + PC2 + PC3 + PC4 + PC5 + PC6 + PC7 + PC8 + PC9 + PC10, data=pnc) 
+summary(birthweight_PRS_lm)
+
+ 
+
+#similar correlations between birthweight and respective PRS in each dataset, but not gestational age 
+#note that in abcd, we don't have gestational age, only have binary 'premature' variable
+cor.test(abcd$bw, abcd$bw_pgs, use= "complete.obs")
+cor.test(pnc$birthwt_kg, pnc$bw_PRS_std, use= "complete.obs")
+ 
+cor.test(abcd$premature, abcd$ga_PRS_inverse, use= "complete.obs")
+cor.test(pnc$gest_age, pnc$ga_PRS_inverse, use= "complete.obs")
+ 
+mean(abcd$birthwt_kg, na.rm=TRUE)
+mean(pnc$birthwt_kg, na.rm=TRUE)
+ 
+ 
+```
+-figure for bw phenotype and PRS association (not making one for preterm since it's binomial)
+```{r}
+
+library("RColorBrewer")
+ 
+model=lm(birthwt_kg ~ sex + bw_pgs + age_days, data=abcd)
+summary(model)
+
+  
+abcd <- abcd[!duplicated(as.list(abcd))]
+ 
+(abcd_phen_bwPRS <- ggplot(data=abcd,aes(y=birthwt_kg, x=bw_pgs)) +
+  geom_point(alpha = 0.7, size = 2, color = '#4393C3') + geom_smooth(method = "lm", se = FALSE, colour='#D6604D', size = 0.5) + theme(axis.text.x=element_text(size=15), axis.title.x=element_text(size=12), axis.title.y=element_text(size=12)) + ggtitle("ABCD") + labs(x="Birthweight PRS", y="Birthweight (kg)", shape = "", color = "") + theme_classic() + stat_cor(method = "spearman",label.x.npc = 0.01, label.y.npc = 0.8,size = 5))
+
+#ggsave(abcd_phen_bwPRS, file="abcd_birthwtPRS.pdf", width = 4, height=4, dpi=300)
+cor.test(abcd$birthwt_kg, abcd$bw_pgs)
+ 
+ 
+```
+
+
+Do prematurity or birthweight (phenotypes) predict imaging phenotypes?
+```{r}
+#linear mixed models of phenotype (premature and bw) and imaging  
+
+# premature (binary variable -- 0 or 1) and imaging
+ 
+d <- which(grepl("surfholes", colnames(abcd)))
+e <- which(grepl("etiv", colnames(abcd)))
+
+abcd_imag_gestage <- as.data.frame(abcd[, -c(e,d)])
+a <-  which(grepl("lh_SA_bankssts", colnames(abcd_imag_gestage)))
+b <-  which(grepl("meanCT", colnames(abcd_imag_gestage)))
+
+abcd_imag_gestage <-as.data.frame(abcd_imag_gestage[,c(a:b)])
+ 
+ 
+abcd_imag.gestage_coef <- data.frame(matrix(NA, nrow = 308, ncol = 5))
+names(abcd_imag.gestage_coef) <- c("Value", "Std.Error", "DF", " t-value", "p-value")
+
+ 
+list_var_gestage <- c() 
+for (i in 1:length(abcd_imag_gestage)) { 
+  variable <- abcd_imag_gestage[,i]
+  cat(i, "of", length(abcd_imag_gestage), "\n")
+  lme_abcd <- lme(variable ~ sex + premature + age_days + surfholes + etiv + QC_ABCD_artifact + QC_ABCD_inhomogeneity + QC_ABCD_motion, data=abcd, random = ~1|site, na.action = na.omit)
+  abcd_imag.gestage_coef[i, ] <- summary(lme_abcd)$tTable[3,]
+  list_var_gestage[i] <- names(abcd_imag_gestage)[i]
+}
+ 
+abcd_imag.gestage_coef <- cbind(list_var_gestage, abcd_imag.gestage_coef) 
+length(which(abcd_imag.gestage_coef$`p-value` < 0.05))
+length(which(p.adjust(abcd_imag.gestage_coef$`p-value`, method="BH") < 0.05)) # many significant hits for premature variable
+  
+ 
+
+# birthweight and imaging
+d <- which(grepl("surfholes", colnames(abcd)))
+e <- which(grepl("etiv", colnames(abcd)))
+f <- which(grepl("rh_SA_supramarginal", colnames(abcd))) # not sure why this is brekaing my code but im taking it out
+abcd_imag_bw <- as.data.frame(abcd[, -c(e,d,f)])
+a <-  which(grepl("lh_SA_bankssts", colnames(abcd_imag_bw)))
+b <-  which(grepl("meanCT", colnames(abcd_imag_bw)))
+
+abcd_imag_bw <-as.data.frame(abcd_imag_bw[,c(a:b)])
+  
+abcd_imag.bw_coef <- data.frame(matrix(NA, nrow = 308, ncol = 5))
+names(abcd_imag.bw_coef) <- c("Value", "Std.Error", "DF", " t-value", "p-value")
+ 
+list_var <- c() 
+for (i in 1:length(abcd_imag_bw)) { 
+  variable <- abcd_imag_bw[,i]
+  cat(i, "of", length(abcd_imag_bw), "\n")
+  lme_abcd <- lme(variable ~ sex + birthwt_kg + age_days + surfholes + etiv + QC_ABCD_artifact + QC_ABCD_inhomogeneity + QC_ABCD_motion, data=abcd, random = ~1|site, na.action = na.omit)
+  abcd_imag.bw_coef[i, ] <- summary(lme_abcd)$tTable[3,]
+  list_var[i] <- names(abcd_imag_bw)[i]
+}
+ 
+abcd_imag.bw_coef <- cbind(list_var, abcd_imag.bw_coef) 
+length(which(abcd_imag.bw_coef$`p-value` < 0.05))
+length(which(p.adjust(abcd_imag.bw_coef$`p-value`, method="BH") < 0.05)) # many significant hits for birthweight
+   
+```
+- figures for regions where cortical thickness, cortical volumes, and surface area are predicted by birthweight (phenotype)
+```{r}
+ 
+length(which(abcd_imag.bw_coef$`p-value` < 0.05))
+x <- abcd_imag.bw_coef$list_var[which(p.adjust(abcd_imag.bw_coef$`p-value`, method="BH") < 0.05)] #many significant hits in birthweight
+length(x)
+lh <- as.character(x[which(grepl("lh", x))])
+rh <- as.character(x[which(grepl("rh", x))]) 
+lh <- gsub(x = lh, pattern = "lh_", replacement = "")
+rh <- gsub(x = rh, pattern = "rh_", replacement = "")
+setdiff(lh,rh)
+ 
+# just do totals for birthweight prs/imaging
+## subset the totals
+ 
+abcd_bw_totals <- abcd_imag.bw_coef[207:305,]
+hits <- abcd_bw_totals$list_var[which(p.adjust(abcd_bw_totals$`p-value`, method="BH") < 0.05)]
+hits_index <- which(p.adjust(abcd_bw_totals$`p-value`, method="BH") < 0.05)
+ 
+# is there one phenotype that is more prominent than the others? (i.e. CT vs vol vs SA). 30 Vol, 31 SA, 7 CT
+
+# get row number in abcd_bw_totals that corresponds to vol
+vol <- hits[which(grepl("Vol_", hits))]  
+vol_index <- c()
+for (i in 1:length(vol)) 
+{ vol_index[i] <- which(vol[i] == abcd_bw_totals$list_var)
+  }
+   
+# get row number in abcd_bw_totals that corresponds to sa
+sa <- hits[which(grepl("SA_", hits))]
+sa_index <- c()
+for (i in 1:length(sa)) 
+{ sa_index[i] <- which(sa[i] == abcd_bw_totals$list_var)
+  }
+  
+# get row number in abcd_bw_totals that corresponds to sa
+CT <- hits[which(grepl("CT_", hits))]
+CT_index <- c()
+for (i in 1:length(CT)) 
+{ CT_index[i] <- which(CT[i] == abcd_bw_totals$list_var)
+  }
+  
+ 
+vol1 <- gsub(x= vol, pattern = "Vol_", replacement = "")
+sa1 <- gsub(x= sa, pattern = "SA_", replacement = "") #has parahippocampal but vol doesn't 
+
+cbind(vol1, sa1)
+
+
+# get the t-values for the imaging phenotypes that survive correction and order them. can technically compare beta coeffs within each phenotype. but i wanna see which phenotype has the strongest effects. Looks like SA and Vol have similar t-value means and pvalues. 
+as.data.frame(cbind(as.vector(abcd_bw_totals$list_var[sa_index]), abcd_bw_totals$` t-value`[sa_index], abcd_bw_totals$`p-value`[sa_index]))
+
+mean(abcd_bw_totals$` t-value`[sa_index]) # surface area seems to have greater effect
+mean(abcd_bw_totals$` t-value`[vol_index])
+mean(abcd_bw_totals$` t-value`[CT_index])
+mean(abcd_bw_totals$`p-value`[sa_index])
+mean(abcd_bw_totals$`p-value`[vol_index])
+mean(abcd_bw_totals$`p-value`[CT_index])
+
+# make subset of data for just cortical volume
+cortvol <- abcd_bw_totals[vol_index,]
+cortvol$list_var
+cortvol$list_var <- gsub(cortvol$list_var, pattern="Vol_", replacement="")
+cortvol$list_var <- gsub(cortvol$list_var, pattern="caudal", replacement="caudal ")
+cortvol$list_var <- gsub(cortvol$list_var, pattern="anterior", replacement="anterior ")
+cortvol$list_var <- gsub(cortvol$list_var, pattern="superior", replacement="superior ")
+cortvol$list_var <- gsub(cortvol$list_var, pattern="inferior", replacement="inferior ")
+cortvol$list_var <- gsub(cortvol$list_var, pattern="posterior", replacement="posterior ")
+cortvol$list_var <- gsub(cortvol$list_var, pattern="lateral", replacement="lateral ")
+cortvol$list_var <- gsub(cortvol$list_var, pattern="middle", replacement="middle ")
+cortvol$list_var <- gsub(cortvol$list_var, pattern="medial", replacement="medial ")
+cortvol$list_var <- gsub(cortvol$list_var, pattern="pars", replacement="pars ")
+cortvol$list_var <- gsub(cortvol$list_var, pattern="isthmus", replacement="isthmus ")
+cortvol$list_var <- gsub(cortvol$list_var, pattern="rostral", replacement="rostral ")
+cortvol$list_var <- gsub(cortvol$list_var, pattern="transverse", replacement="transverse ")
+cortvol$list_var <- gsub(cortvol$list_var, pattern="frontalpole", replacement="frontal pole")
+cortvol$list_var <- gsub(cortvol$list_var, pattern="temporalpole", replacement="temporal pole")
+names(cortvol)[1] <- "region"
+names(cortvol)[5] <- "tval"
+  
+###################
+##### figure ######
+###################
+(cortvol.fig <- cortvol %>% 
+  ggseg(mapping=aes(fill=as.numeric(tval)), position="stacked", colour="black",size=.5,show.legend = T,  hemisphere = "left") +   labs(fill = "t value") + scale_fill_gradientn(colours= c("#053061", "#2166AC" ,  "#4393C3", "#F7F7F7" , "#FDDBC7", "#F4A582" ,  "#D6604D",  "#B2182B" , "#67001F")) + theme_void() + theme( plot.title = element_text(vjust = 9, hjust = 0.5), legend.position = "bottom", legend.text = element_text(size = 8)) +
+  ggtitle("Birthweight predicts Cortical Volume (ABCD)"))
+# ggsave(cortvol.fig, file="abcd_bw_cortvol.pdf", width = 6, height=4, dpi=300)
+
+     
+  
+# make subset of data for just surface area
+surfarea <- abcd_bw_totals[sa_index,]
+surfarea$list_var
+surfarea$list_var <- gsub(surfarea$list_var, pattern="SA_", replacement="")
+surfarea$list_var <- gsub(surfarea$list_var, pattern="caudal", replacement="caudal ")
+surfarea$list_var <- gsub(surfarea$list_var, pattern="anterior", replacement="anterior ")
+surfarea$list_var <- gsub(surfarea$list_var, pattern="superior", replacement="superior ")
+surfarea$list_var <- gsub(surfarea$list_var, pattern="inferior", replacement="inferior ")
+surfarea$list_var <- gsub(surfarea$list_var, pattern="posterior", replacement="posterior ")
+surfarea$list_var <- gsub(surfarea$list_var, pattern="lateral", replacement="lateral ")
+surfarea$list_var <- gsub(surfarea$list_var, pattern="middle", replacement="middle ")
+surfarea$list_var <- gsub(surfarea$list_var, pattern="medial", replacement="medial ")
+surfarea$list_var <- gsub(surfarea$list_var, pattern="pars", replacement="pars ")
+surfarea$list_var <- gsub(surfarea$list_var, pattern="isthmus", replacement="isthmus ")
+surfarea$list_var <- gsub(surfarea$list_var, pattern="rostral", replacement="rostral ")
+surfarea$list_var <- gsub(surfarea$list_var, pattern="transverse", replacement="transverse ")
+surfarea$list_var <- gsub(surfarea$list_var, pattern="frontalpole", replacement="frontal pole")
+surfarea$list_var <- gsub(surfarea$list_var, pattern="temporalpole", replacement="temporal pole")
+names(surfarea)[1] <- "region"
+names(surfarea)[5] <- "tval"
+surfarea$region
+
+###################
+##### figure ######
+###################
+
+(surfarea.fig <- surfarea %>% 
+  ggseg(mapping=aes(fill=as.numeric(tval)), position="stacked", colour="black",size=.5,show.legend = T,  hemisphere = "left") +   labs(fill = "t value") + scale_fill_gradientn(colours= c("#053061", "#2166AC" ,  "#4393C3", "#D1E5F0", "#FDDBC7", "#F4A582" ,  "#D6604D", "#67001F")) + theme_void() + theme( plot.title = element_text(vjust = 9, hjust = 0.5), legend.position = "bottom",
+        legend.text = element_text(size = 8)) +
+  ggtitle("Surface Area"))
+# ggsave(surfarea.fig, file="abcd_bw_surfarea.pdf", width = 6, height=4, dpi=300)
+
+# make subset of data for just cortical thickness
+cortthick <- abcd_bw_totals[CT_index,]
+cortthick$list_var
+cortthick$list_var <- gsub(cortthick$list_var, pattern="CT_", replacement="")
+cortthick$list_var <- gsub(cortthick$list_var, pattern="caudal", replacement="caudal ")
+cortthick$list_var <- gsub(cortthick$list_var, pattern="anterior", replacement="anterior ")
+cortthick$list_var <- gsub(cortthick$list_var, pattern="superior", replacement="superior ")
+cortthick$list_var <- gsub(cortthick$list_var, pattern="inferior", replacement="inferior ")
+cortthick$list_var <- gsub(cortthick$list_var, pattern="posterior", replacement="posterior ")
+cortthick$list_var <- gsub(cortthick$list_var, pattern="lateral", replacement="lateral ")
+cortthick$list_var <- gsub(cortthick$list_var, pattern="middle", replacement="middle ")
+cortthick$list_var <- gsub(cortthick$list_var, pattern="medial", replacement="medial ")
+cortthick$list_var <- gsub(cortthick$list_var, pattern="pars", replacement="pars ")
+cortthick$list_var <- gsub(cortthick$list_var, pattern="isthmus", replacement="isthmus ")
+cortthick$list_var <- gsub(cortthick$list_var, pattern="rostral", replacement="rostral ")
+cortthick$list_var <- gsub(cortthick$list_var, pattern="transverse", replacement="transverse ")
+cortthick$list_var <- gsub(cortthick$list_var, pattern="frontalpole", replacement="frontal pole")
+cortthick$list_var <- gsub(cortthick$list_var, pattern="temporalpole", replacement="temporal pole")
+names(cortthick)[1] <- "region"
+names(cortthick)[5] <- "tval"
+cortthick$region
+
+# cortical thickness -- make the image
+  
+library(tidyverse)
+library(ggseg)
+
+###################
+##### figure ######
+###################
+
+(cortthick.fig <- cortthick %>% 
+  ggseg(mapping=aes(fill=as.numeric(tval)), position="stacked", colour="black",size=.5,show.legend = T,  hemisphere = "left") +   labs(fill = "t value") +  scale_fill_gradientn(colours= c("#053061", "#2166AC" ,  "#4393C3", "#92C5DE", "#D1E5F0", "#F7F7F7" , "#FDDBC7", "#F4A582" ,  "#D6604D")) + theme_void() + theme( plot.title = element_text(vjust = 9, hjust = 0.5), legend.position = "bottom",
+        legend.text = element_text(size = 8)) +
+  ggtitle("Cortical Thickness"))
+# ggsave(cortthick.fig, file="abcd_bw_cortthick.pdf", width = 6, height=4, dpi=300)
+   
+ 
+```
+- figures for regions where cortical thickness, cortical volumes, and surface area are predicted by prematurity (binary variable)
+```{r}
+  
+x <- abcd_imag.gestage_coef$list_var_gestage[which(p.adjust(abcd_imag.gestage_coef$`p-value`, method="BH") < 0.05)] #many significant hits  
+
+ 
+lh <- as.character(x[which(grepl("lh", x))])
+rh <- as.character(x[which(grepl("rh", x))]) 
+lh <- gsub(x = lh, pattern = "lh_", replacement = "")
+rh <- gsub(x = rh, pattern = "rh_", replacement = "")
+setdiff(lh,rh)
+
+# just do totals for birthweight prs/imaging
+## subset the totals
+abcd_imag.gestage_coef$list_var
+abcd_gestage_totals <- abcd_imag.gestage_coef[208:306,]
+hits <- abcd_gestage_totals$list_var[which(p.adjust(abcd_gestage_totals$`p-value`, method="BH") < 0.05)]
+hits_index <- which(p.adjust(abcd_gestage_totals$`p-value`, method="BH") < 0.05)
+ 
+# is there one phenotype that is more prominent than the others? (i.e. CT vs vol vs SA). 30 Vol, 31 SA, 7 CT
+
+# get row number in abcd_gestage_totals that corresponds to vol
+vol <- hits[which(grepl("Vol_", hits))]  
+vol_index <- c()
+for (i in 1:length(vol)) 
+{ vol_index[i] <- which(vol[i] == abcd_gestage_totals$list_var)
+  }
+   
+# get row number in abcd_gestage_totals that corresponds to sa
+sa <- hits[which(grepl("SA_", hits))]
+sa_index <- c()
+for (i in 1:length(sa)) 
+{ sa_index[i] <- which(sa[i] == abcd_gestage_totals$list_var)
+  }
+  
+# get row number in abcd_gestage_totals that corresponds to sa
+CT <- hits[which(grepl("CT_", hits))]
+CT_index <- c()
+for (i in 1:length(CT)) 
+{ CT_index[i] <- which(CT[i] == abcd_gestage_totals$list_var)
+  }
+  
+ 
+vol1 <- gsub(x= vol, pattern = "Vol_", replacement = "")
+sa1 <- gsub(x= sa, pattern = "SA_", replacement = "") #has parahippocampal but vol doesn't 
+
+ 
+
+
+# get the t-values for the imaging phenotypes that survive correction and order them. can technically compare beta coeffs within each phenotype. but i wanna see which phenotype has the strongest effects. Looks like SA and Vol have similar t-value means and pvalues. 
+as.data.frame(cbind(as.vector(abcd_gestage_totals$list_var[sa_index]), abcd_gestage_totals$` t-value`[sa_index], abcd_gestage_totals$`p-value`[sa_index]))
+
+mean(abcd_gestage_totals$` t-value`[sa_index]) # surface area seems to have greater effect
+mean(abcd_gestage_totals$` t-value`[vol_index])
+mean(abcd_gestage_totals$` t-value`[CT_index])
+mean(abcd_gestage_totals$`p-value`[sa_index])
+mean(abcd_gestage_totals$`p-value`[vol_index])
+mean(abcd_gestage_totals$`p-value`[CT_index])
+
+# make subset of data for just cortical volume
+cortvol <- abcd_gestage_totals[vol_index,]
+cortvol$list_var
+cortvol$list_var_gestage<- gsub(cortvol$list_var, pattern="Vol_", replacement="")
+cortvol$list_var_gestage<- gsub(cortvol$list_var, pattern="caudal", replacement="caudal ")
+cortvol$list_var_gestage<- gsub(cortvol$list_var, pattern="anterior", replacement="anterior ")
+cortvol$list_var_gestage<- gsub(cortvol$list_var, pattern="superior", replacement="superior ")
+cortvol$list_var_gestage<- gsub(cortvol$list_var, pattern="inferior", replacement="inferior ")
+cortvol$list_var_gestage<- gsub(cortvol$list_var, pattern="posterior", replacement="posterior ")
+cortvol$list_var_gestage<- gsub(cortvol$list_var, pattern="lateral", replacement="lateral ")
+cortvol$list_var_gestage<- gsub(cortvol$list_var, pattern="middle", replacement="middle ")
+cortvol$list_var_gestage<- gsub(cortvol$list_var, pattern="medial", replacement="medial ")
+cortvol$list_var_gestage<- gsub(cortvol$list_var, pattern="pars", replacement="pars ")
+cortvol$list_var_gestage<- gsub(cortvol$list_var, pattern="isthmus", replacement="isthmus ")
+cortvol$list_var_gestage<- gsub(cortvol$list_var, pattern="rostral", replacement="rostral ")
+cortvol$list_var_gestage<- gsub(cortvol$list_var, pattern="transverse", replacement="transverse ")
+cortvol$list_var_gestage<- gsub(cortvol$list_var, pattern="frontalpole", replacement="frontal pole")
+cortvol$list_var_gestage<- gsub(cortvol$list_var, pattern="temporalpole", replacement="temporal pole")
+names(cortvol)[1] <- "region"
+names(cortvol)[5] <- "tval"
+ 
+
+###################
+##### figure ######
+###################
+ 
+(cortvol.fig <- cortvol %>% 
+  ggseg(mapping=aes(fill=as.numeric(tval)), position="stacked", colour="black",size=.5,show.legend = T,  hemisphere = "left") +   labs(fill = "t value") + scale_fill_gradientn(colors = c("#276419", "#4D9221", "#7FBC41","#B8E186", "#F7F7F7","#F1B6DA","#DE77AE", "#C51B7D")) + theme_void() + theme( plot.title = element_text(vjust = 9, hjust = 0.5), legend.position = "bottom",
+        legend.text = element_text(size = 8)) +
+  ggtitle("Prematurity predicts Cortical Volume (ABCD)"))
+#ggsave(cortvol.fig, file="abcd_gestage_cortvol.pdf", width = 6, height=4, dpi=300)
+   
+ 
+ 
+# make subset of data for just surface area
+surfarea <- abcd_gestage_totals[sa_index,]
+surfarea$list_var
+surfarea$list_var_gestage<- gsub(surfarea$list_var, pattern="SA_", replacement="")
+surfarea$list_var_gestage<- gsub(surfarea$list_var, pattern="caudal", replacement="caudal ")
+surfarea$list_var_gestage<- gsub(surfarea$list_var, pattern="anterior", replacement="anterior ")
+surfarea$list_var_gestage<- gsub(surfarea$list_var, pattern="superior", replacement="superior ")
+surfarea$list_var_gestage<- gsub(surfarea$list_var, pattern="inferior", replacement="inferior ")
+surfarea$list_var_gestage<- gsub(surfarea$list_var, pattern="posterior", replacement="posterior ")
+surfarea$list_var_gestage<- gsub(surfarea$list_var, pattern="lateral", replacement="lateral ")
+surfarea$list_var_gestage<- gsub(surfarea$list_var, pattern="middle", replacement="middle ")
+surfarea$list_var_gestage<- gsub(surfarea$list_var, pattern="medial", replacement="medial ")
+surfarea$list_var_gestage<- gsub(surfarea$list_var, pattern="pars", replacement="pars ")
+surfarea$list_var_gestage<- gsub(surfarea$list_var, pattern="isthmus", replacement="isthmus ")
+surfarea$list_var_gestage<- gsub(surfarea$list_var, pattern="rostral", replacement="rostral ")
+surfarea$list_var_gestage<- gsub(surfarea$list_var, pattern="transverse", replacement="transverse ")
+surfarea$list_var_gestage<- gsub(surfarea$list_var, pattern="frontalpole", replacement="frontal pole")
+surfarea$list_var_gestage<- gsub(surfarea$list_var, pattern="temporalpole", replacement="temporal pole")
+names(surfarea)[1] <- "region"
+names(surfarea)[5] <- "tval"
+surfarea$region
+
+###################
+##### figure ######
+###################
+(surfarea.fig <- surfarea %>% 
+  ggseg(mapping=aes(fill=as.numeric(tval)), position="stacked", colour="black",size=.5,show.legend = T,  hemisphere = "left") +   labs(fill = "t value") + scale_fill_gradientn(colors = c("#276419", "#4D9221", "#7FBC41","#B8E186", "#E6F5D0")) + theme_void() + theme( plot.title = element_text(vjust = 9, hjust = 0.5), legend.position = "bottom",
+        legend.text = element_text(size = 8)) +
+  ggtitle("Surface Area"))
+#ggsave(surfarea.fig, file="abcd_gestage_surfarea.pdf", width = 6, height=4, dpi=300)
+   
+ 
+# make subset of data for just cortical thickness
+cortthick <- abcd_gestage_totals[CT_index,]
+cortthick$list_var
+cortthick$list_var_gestage<- gsub(cortthick$list_var, pattern="CT_", replacement="")
+cortthick$list_var_gestage<- gsub(cortthick$list_var, pattern="caudal", replacement="caudal ")
+cortthick$list_var_gestage<- gsub(cortthick$list_var, pattern="anterior", replacement="anterior ")
+cortthick$list_var_gestage<- gsub(cortthick$list_var, pattern="superior", replacement="superior ")
+cortthick$list_var_gestage<- gsub(cortthick$list_var, pattern="inferior", replacement="inferior ")
+cortthick$list_var_gestage<- gsub(cortthick$list_var, pattern="posterior", replacement="posterior ")
+cortthick$list_var_gestage<- gsub(cortthick$list_var, pattern="lateral", replacement="lateral ")
+cortthick$list_var_gestage<- gsub(cortthick$list_var, pattern="middle", replacement="middle ")
+cortthick$list_var_gestage<- gsub(cortthick$list_var, pattern="medial", replacement="medial ")
+cortthick$list_var_gestage<- gsub(cortthick$list_var, pattern="pars", replacement="pars ")
+cortthick$list_var_gestage<- gsub(cortthick$list_var, pattern="isthmus", replacement="isthmus ")
+cortthick$list_var_gestage<- gsub(cortthick$list_var, pattern="rostral", replacement="rostral ")
+cortthick$list_var_gestage<- gsub(cortthick$list_var, pattern="transverse", replacement="transverse ")
+cortthick$list_var_gestage<- gsub(cortthick$list_var, pattern="frontalpole", replacement="frontal pole")
+cortthick$list_var_gestage<- gsub(cortthick$list_var, pattern="temporalpole", replacement="temporal pole")
+names(cortthick)[1] <- "region"
+names(cortthick)[5] <- "tval"
+ 
+ 
+###################
+##### figure ######
+###################
+(cortthick.fig <- cortthick %>% 
+  ggseg(mapping=aes(fill=as.numeric(tval)), position="stacked", colour="black",size=.5,show.legend = T,  hemisphere = "left") +   labs(fill = "t value") + scale_fill_gradientn(colors = c("#276419", "#4D9221", "#7FBC41","#B8E186", "#F7F7F7","#F1B6DA", "#C51B7D")) + theme_void() + theme( plot.title = element_text(vjust = 9, hjust = 0.5), legend.position = "bottom",
+        legend.text = element_text(size = 8)) +
+  ggtitle("Cortical Thickness"))
+#ggsave(cortthick.fig, file="abcd_gestage_cortthick.pdf", width = 6, height=4, dpi=300)
+
+```
+ 
+ 
+Do gestage and birthweight PRS predict imaging phenotypes?
+```{r}
+# linear mixed models of gestage and birthweight PRS and imaging
+
+# gaPRS for ABCD
+d <- which(grepl("surfholes", colnames(abcd)))
+e <- which(grepl("etiv", colnames(abcd)))
+abcd_imag.pc <- as.data.frame(abcd[, -c(e,d)])
+a <-  which(grepl("lh_SA_bankssts", colnames(abcd_imag.pc)))
+b <-  which(grepl("meanCT", colnames(abcd_imag.pc)))
+
+abcd_imag.pc <-as.data.frame(abcd_imag.pc[,c(a:b)])
+abcd_imag.pc_gaPRS <- data.frame(matrix(NA, nrow = 309, ncol = 5))
+names(abcd_imag.pc_gaPRS) <- c("Value", "Std.Error", "DF", " t-value", "p-value")
+
+list_var <- c() 
+for (i in 1:length(abcd_imag.pc)) { 
+  variable <- abcd_imag.pc[,i]
+  lme_abcd <- lme(variable ~ sex + ga_PRS_inverse + age_days + surfholes + etiv + QC_ABCD_artifact + QC_ABCD_inhomogeneity + QC_ABCD_motion + PC1 + PC2 + PC3 + PC4 + PC5 + PC6 + PC7 + PC8 + PC9 + PC10, data=abcd, random = ~1|site, na.action = na.omit)
+  abcd_imag.pc_gaPRS[i, ] <- summary(lme_abcd)$tTable[3,]
+  list_var[i] <- names(abcd_imag.pc)[i]
+}
+abcd_imag.pc_gaPRS <- cbind(list_var, abcd_imag.pc_gaPRS) 
+which(abcd_imag.pc_gaPRS$`p-value` < 0.05)
+which(p.adjust(abcd_imag.pc_gaPRS$`p-value`, method="BH") < 0.05) #no significant hits in gaPRS
+
+# bwPRS for ABCD
+d <- which(grepl("surfholes", colnames(abcd)))
+abcd_imag.pc <- as.data.frame(abcd[, -d])
+a <-  which(grepl("lh_SA_bankssts", colnames(abcd_imag.pc)))
+b <-  which(grepl("meanCT", colnames(abcd_imag.pc)))
+
+abcd_imag.pc <-as.data.frame(abcd_imag.pc[,c(a:b)])
+names(abcd_imag.pc)[c(a:b)] 
+abcd_imag.pc_bwPRS <- data.frame(matrix(NA, nrow = 310, ncol = 5))
+names(abcd_imag.pc_bwPRS) <- c("Value", "Std.Error", "DF", " t-value", "p-value")
+
+list_var <- c() 
+for (i in 1:length(abcd_imag.pc)) { 
+  variable <- abcd_imag.pc[,i]
+  lme_abcd <- lme(variable ~ sex + bw_pgs + age_days + surfholes + QC_ABCD_artifact + QC_ABCD_inhomogeneity + QC_ABCD_motion + PC1 + PC2 + PC3 + PC4 + PC5 + PC6 + PC7 + PC8 + PC9 + PC10, data=abcd, random = ~1|site, na.action = na.omit)
+  abcd_imag.pc_bwPRS[i, ] <- summary(lme_abcd)$tTable[3,]
+  list_var[i] <- names(abcd_imag.pc)[i]
+}
+abcd_imag.pc_bwPRS <- cbind(list_var, abcd_imag.pc_bwPRS) 
+length(which(abcd_imag.pc_bwPRS$`p-value` < 0.05))
+length(which(p.adjust(abcd_imag.pc_bwPRS$`p-value`, method="BH") < 0.05)) #many significant hits in bwPRS
+  names(abcd)
+
+#### try with etiv as covar  
+  
+d <- which(grepl("surfholes", colnames(abcd)))
+e <- which(grepl("etiv", colnames(abcd)))
+abcd_imag.pc1 <- as.data.frame(abcd[, -c(e,d)])
+a <-  which(grepl("lh_SA_bankssts", colnames(abcd_imag.pc1)))
+b <-  which(grepl("meanCT", colnames(abcd_imag.pc1)))
+
+abcd_imag.pc1 <-as.data.frame(abcd_imag.pc1[,c(a:b)])
+names(abcd_imag.pc1)[c(a:b)] 
+
+abcd_imag.pc1_bwPRS <- data.frame(matrix(NA, nrow = 309, ncol = 5))
+names(abcd_imag.pc1_bwPRS) <- c("Value", "Std.Error", "DF", " t-value", "p-value")
+  
+list_var <- c() 
+for (i in 1:length(abcd_imag.pc1)) { 
+  variable <- abcd_imag.pc1[,i]
+  lme_abcd <- lme(variable ~ sex + bw_pgs + age_days + surfholes + etiv + QC_ABCD_artifact + QC_ABCD_inhomogeneity + QC_ABCD_motion + PC1 + PC2 + PC3 + PC4 + PC5 + PC6 + PC7 + PC8 + PC9 + PC10, data=abcd, random = ~1|site, na.action = na.omit)
+  abcd_imag.pc1_bwPRS[i, ] <- summary(lme_abcd)$tTable[3,]
+  list_var[i] <- names(abcd_imag.pc1)[i]
+}
+abcd_imag.pc1_bwPRS <- cbind(list_var, abcd_imag.pc1_bwPRS) 
+length(which(abcd_imag.pc1_bwPRS$`p-value` < 0.05))
+length(which(p.adjust(abcd_imag.pc1_bwPRS$`p-value`, method="BH") < 0.05)) #no significant hits in bwPRS when controlling for etiv 
+
+  
+ 
+```
+
+
+The following analyses in ABCD are not finished...
+ 
+# mediation analysis (since etiv and GMV both cause effect of bwPRS to go away)
+# sensitivity / mediation analysis
+-  there is an indirect effect of the ga and bw PRS on the likelihood of psychopathology via envSES or trauma
+- IV = bw PRS
+- DV = imaging phenotypes
+- mediator = etiv
+
+1) Test the total effect. Here we are looking if any change in ga and bw PRS impacts the DV at all   
+2) Test the effect of the independent variable on the mediator. 
+3) Test the mediator's and the independent variable’s effect on the dependent variable.
+4) Estimate various quantities for causal mediation analysis, meaning that we will compare the direct to the indirect effect, giving us more insight into what is going on in the data.
+https://towardsdatascience.com/doing-and-reporting-your-first-mediation-analysis-in-r-2fe423b92171 
+```{r}
+
+
+d <- which(grepl("surfholes", colnames(abcd)))
+e <- which(grepl("etiv", colnames(abcd)))
+abcd_imag <- as.data.frame(abcd[, -c(e,d)])
+a <-  which(grepl("lh_SA_bankssts", colnames(abcd_imag)))
+b <-  which(grepl("meanCT", colnames(abcd_imag)))
+abcd_imag <-as.data.frame(abcd_imag[,c(a:b)])
+#names(abcd_imag) 
+ 
+ 
+#### 1) the total effect -- effect of IV on DV (bwPRS on imaging)
+ 
+abcd_imag_bwPRS <- data.frame(matrix(NA, nrow = 309, ncol = 5))
+names(abcd_imag_bwPRS) <- c("Value", "Std.Error", "DF", " t-value", "p-value")
+  
+list_var <- c() 
+for (i in 1:length(abcd_imag)) { 
+  variable <- abcd_imag[,i]
+  lme_abcd <- lme(variable ~ sex + bw_pgs + age_days + surfholes + QC_ABCD_artifact + QC_ABCD_inhomogeneity + QC_ABCD_motion, data=abcd, random = ~1|site, na.action = na.omit)
+  abcd_imag_bwPRS[i, ] <- summary(lme_abcd)$tTable 
+  list_var[i] <- names(abcd_imag)[i]
+}
+abcd_imag_bwPRS <- cbind(list_var, abcd_imag_bwPRS) 
+length(which(abcd_imag_bwPRS$`p-value` < 0.05))
+length(which(p.adjust(abcd_imag_bwPRS$`p-value`, method="BH") < 0.05)) 
+
+summary(lme(variable ~ sex + bw_pgs + age_days + surfholes + QC_ABCD_artifact + QC_ABCD_inhomogeneity + QC_ABCD_motion, data=abcd, random = ~1|site, na.action = na.omit)) 
+ 
+ 
+##### 2) does IV have effect on mediator? bwPRS on etiv
+abcd_etiv_bwPRS <- summary(lm(etiv ~ sex + bw_pgs +age_days + surfholes + QC_ABCD_artifact + QC_ABCD_inhomogeneity + QC_ABCD_motion , data=abcd))
+ 
+  
+##### 3)The effect of the mediator on the dependent variable -- etiv on imaging phenotypes
+d <- which(grepl("surfholes", colnames(abcd)))
+e <- which(grepl("etiv", colnames(abcd)))
+f<- which(grepl("lh_SA_superiorparietal", colnames(abcd)))
+abcd_imag <- as.data.frame(abcd[, -c(d, e, f)])
+a <-  which(grepl("lh_SA_bankssts", colnames(abcd_imag)))
+b <-  which(grepl("meanCT", colnames(abcd_imag)))
+abcd_imag <-as.data.frame(abcd_imag[,c(a:b)])
+
+abcd_etiv_imag <- data.frame(matrix(NA, nrow = 308, ncol = 5))
+names(abcd_etiv_imag) <- c("Value", "Std.Error", "DF", " t-value", "p-value")
+  
+list_var <- c() 
+for (i in 1:length(abcd_imag)) { 
+  variable <- abcd_imag[,i]
+  cat(i, "of", length(abcd_imag), "\n")
+  lme_abcd <- lme(variable ~ sex + etiv + bw_pgs + age_days + surfholes + QC_ABCD_artifact + QC_ABCD_inhomogeneity + QC_ABCD_motion, data=abcd, random = ~1|site, na.action = na.omit)
+  abcd_etiv_imag[i, ] <- summary(lme_abcd)$tTable[4,]
+  list_var[i] <- names(abcd_imag)[i]
+}
+
+abcd_etiv_imag <- cbind(list_var, abcd_etiv_imag) 
+length(which(abcd_etiv_imag$`p-value` < 0.05))
+length(which(p.adjust(abcd_etiv_imag$`p-value`, method="BH") < 0.05)) # p values are crazy significant
+# I think this is a complete mediation because bwPRS was a significant predictor of imaginig phenotypes before, but is no longer after introduction of etiv. All the information of bwPRS that was contained in the imaging phenotpes is also in etiv. The total effect of bwPRS is explained by etiv. The total effect of bwPRS onto imaging phenotype goes through etiv. 
+
+ 
+
+##### 4) causal mediation analysis
+ 
+  
+```
+
+
+# linear models of PRS and imaging (for pnc)
+# can i add total volume
+```{r}
+
+names(pnc)
+
+# gaPRS for PNC            
+d <- which(grepl("SurfaceHoles", colnames(pnc)))
+pnc_imag <- as.data.frame(pnc[,-d])
+a <-  which(grepl("AsegVol_Left.Lateral.Ventricle", colnames(pnc_imag)))
+b <-  which( colnames(pnc_imag) == "Vol_insula")
+
+pnc_imag <-as.data.frame(pnc_imag[,c(a:b)])
+pnc_imag_gaPRS <- data.frame(matrix(NA, nrow = 384, ncol = 4))
+names(pnc_imag_gaPRS) <- c("Value", "Std.Error", " t-value", "p-value")
+list_var <- c() 
+for (i in 1:length(pnc_imag)) { 
+  variable <- pnc_imag[,i]
+  lm_pnc <- lm(variable ~  sex + ga_PRS_inverse + ageAtClinicalAssess1 + averageManualRating + AsegVol_SurfaceHoles + envSES + Cummulative_Stress_Load_No_Rape + PC1 + PC2 + PC3 + PC4 + PC5 + PC6 + PC7 + PC8 + PC9 + PC10, data=pnc)
+  pnc_imag_gaPRS[i, ] <- summary(lm_pnc)$coefficients[3,]
+  list_var[i] <- names(pnc_imag)[i]
+}
+
+pnc_imag_gaPRS <- cbind(list_var, pnc_imag_gaPRS) 
+which(pnc_imag_gaPRS$`p-value` < 0.05)
+which(p.adjust(pnc_imag_gaPRS$`p-value`, method="BH") < 0.05) # no gaPRS - imaging results
+  
+# bwPRS for PNC            
+d <- which(grepl("SurfaceHoles", colnames(pnc)))
+pnc_imag <- as.data.frame(pnc[,-d])
+a <-  which(grepl("AsegVol_Left.Lateral.Ventricle", colnames(pnc_imag)))
+b <-  which( colnames(pnc_imag) == "Vol_insula")
+
+pnc_imag <-as.data.frame(pnc_imag[,c(a:b)])
+pnc_imag_bwPRS <- data.frame(matrix(NA, nrow = 384, ncol = 4))
+names(pnc_imag_bwPRS) <- c("Value", "Std.Error", " t-value", "p-value")
+list_var <- c() 
+for (i in 1:length(pnc_imag)) {  
+  variable <- pnc_imag[,i]
+  lm_pnc <- lm(variable ~  sex + bw_PRS_std + ageAtClinicalAssess1 + averageManualRating + AsegVol_SurfaceHoles + envSES + Cummulative_Stress_Load_No_Rape + PC1 + PC2 + PC3 + PC4 + PC5 + PC6 + PC7 + PC8 + PC9 + PC10, data=pnc)
+  pnc_imag_bwPRS[i, ] <- summary(lm_pnc)$coefficients[3,]
+  list_var[i] <- names(pnc_imag)[i]
+}
+ 
+pnc_imag_bwPRS <- cbind(list_var, pnc_imag_bwPRS) 
+which(pnc_imag_bwPRS$`p-value` < 0.05)
+which(p.adjust(pnc_imag_bwPRS$`p-value`, method="BH") < 0.05) # no bwPRS - imaging results
+  
+pnc_imag_bwPRS$list_var[which(pnc_imag_bwPRS$`p-value` < 0.05)] 
+```
+
+ 
+# correlation of beta coeff's for ga/bw PRS for pnc and abcd
+```{r}
+ 
+ 
+# gaPRS correlation of beta coefficients 
+dim(abcd_imag_gaPRS)
+dim(pnc_imag_gaPRS)
+
+pnc_imag_gaPRS_ordered <- pnc_imag_gaPRS[match(abcd_imag_gaPRS$list_var, pnc_imag_gaPRS$list_var),]
+setdiff(abcd_imag_gaPRS$list_var,  pnc_imag_gaPRS_ordered$list_var)
+
+m  <- which(abcd_imag_gaPRS$list_var == "etiv") 
+n <- which(abcd_imag_gaPRS$list_var == "meanSA") 
+o <- which(abcd_imag_gaPRS$list_var == "totalSA") 
+p <- which(abcd_imag_gaPRS$list_var == "meanCT") 
+abcd_imag_gaPRS <- abcd_imag_gaPRS[-c(m,n,o,p),]
+pnc_imag_gaPRS_ordered <- pnc_imag_gaPRS_ordered[-c(m,n,o,p),]
+setdiff(abcd_imag_gaPRS$list_var,  pnc_imag_gaPRS_ordered$list_var)
+     
+cor.test(abcd_imag_gaPRS$Value, pnc_imag_gaPRS_ordered$Value) 
+
+  
+# gaPRS correlation of beta coefficients 
+dim(abcd_imag1_bwPRS)
+dim(pnc_imag_bwPRS)
+
+pnc_imag_bwPRS_ordered <- pnc_imag_bwPRS[match(abcd_imag1_bwPRS$list_var, pnc_imag_bwPRS$list_var),]
+setdiff(abcd_imag1_bwPRS$list_var,  pnc_imag_bwPRS_ordered$list_var)
+
+m  <- which(abcd_imag1_bwPRS$list_var == "etiv") 
+n <- which(abcd_imag1_bwPRS$list_var == "meanSA") 
+o <- which(abcd_imag1_bwPRS$list_var == "totalSA") 
+p <- which(abcd_imag1_bwPRS$list_var == "meanCT") 
+abcd_imag1_bwPRS <- abcd_imag1_bwPRS[-c(m,n,o,p),]
+pnc_imag_bwPRS_ordered <- pnc_imag_bwPRS_ordered[-c(m,n,o,p),]
+setdiff(abcd_imag1_bwPRS$list_var,  pnc_imag_bwPRS_ordered$list_var)
+     
+cor.test(abcd_imag1_bwPRS$Value, pnc_imag_bwPRS_ordered$Value) 
+
+range(abcd$age_days, na.rm=TRUE)
+ 
+```
+
+ 
+# post hoc imaging analysis: include both prs scores - not finished 
+
+```{r}
+
+
+# ga.bwPRS for ABCD
+d <- which(grepl("surfholes", colnames(abcd)))
+abcd_imag <- as.data.frame(abcd[, -d])
+a <-  which(grepl("lh_SA_bankssts", colnames(abcd_imag)))
+b <-  which(grepl("meanCT", colnames(abcd_imag)))
+
+abcd_imag <-as.data.frame(abcd_imag[,c(a:b)])
+abcd_imag_ga.bwPRS <- data.frame(matrix(NA, nrow = 310, ncol = 5))
+names(abcd_imag_ga.bwPRS) <- c("Value", "Std.Error", "DF", " t-value", "p-value")
+
+list_var <- c() 
+for (i in 1:length(abcd_imag)) { 
+  variable <- abcd_imag[,i]
+  lme_abcd <- lme(variable ~ sex + ga_PRS_inverse + bw_pgs + age_days + surfholes + QC_ABCD_artifact + QC_ABCD_inhomogeneity + QC_ABCD_motion, data=abcd, random = ~1|site, na.action = na.omit)
+  abcd_imag_ga.bwPRS[i, ] <- summary(lme_abcd)$tTable[3,]
+  list_var[i] <- names(abcd_imag)[i]
+}
+
+
+lme_abcd <- lme(lh_SA_bankssts ~ sex + ga_PRS_inverse + bw_pgs + age_days + surfholes + QC_ABCD_artifact + QC_ABCD_inhomogeneity + QC_ABCD_motion, data=abcd, random = ~1|site, na.action = na.omit)
+summary(lme_abcd)$tTable 
+
+abcd_imag_ga.bwPRS <- cbind(list_var, abcd_imag_ga.bwPRS) 
+which(abcd_imag_ga.bwPRS$`p-value` < 0.05)
+which(p.adjust(abcd_imag_ga.bwPRS$`p-value`, method="BH") < 0.05) #no significant hits in ga.bwPRS
+
+ 
+
+```
+
+# ga/bw PRS predict dx in ABCD - nothing
+```{r}
+levels(abcd$dx)
+ 
+
+abcd$dx <- relevel(abcd$dx, ref = "CN")
+test <- multinom(dx ~ sex + bw_pgs + age_days, data=abcd)
+summary(test)
+
+ 
+#calculate p-values (since multinom doesn't provide pvals)
+z <- summary(test)$coefficients/summary(test)$standard.errors
+z
+p <- (1 - pnorm(abs(z), 0, 1)) * 2 #2-tailed z
+p
+
+ 
+#The ratio of the probability of choosing one outcome category over the probability of choosing the baseline category is often referred as relative risk 
+
+exp(coef(test))
+
+library(RVAideMemoire)
+library(broom)
+exp(coef(test))
+oddsratio_df <- OR.multinom(test, dx, conf.level = 0.95)
+(tidy(test, conf.int = TRUE, conf.level = 0.95, exponentiate = TRUE)) # yup
+ 
+   
+```
+
+ 
+#laura a - suggestions
+-- at some point would be good to include the phenotype and PRS in a single model and see what happens, even if underpowered. 
+-- Also she had the idea of looking at association with PRS in full term folks only, ie to try to mitigate the effect of the phenotype per se and isolate the genetic effect
